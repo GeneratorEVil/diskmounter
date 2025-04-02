@@ -12,7 +12,6 @@ import (
 // Partition represents a disk partition
 type Partition struct {
 	StartSector int64
-	EndSector   int64
 	Size        int64
 	Type        string
 }
@@ -27,11 +26,9 @@ func Mount(imagePath, mountPoint string) error {
 		return fmt.Errorf("no partitions found in %s", imagePath)
 	}
 
-	// Используем первый раздел
 	partition := partitions[0]
-	offset := partition.StartSector * 512 // Смещение в байтах
+	offset := partition.StartSector * 512
 
-	// Выполняем команду mount
 	cmd := exec.Command("mount", "-t", "ext4", "-o", fmt.Sprintf("loop,offset=%d,rw", offset), imagePath, mountPoint)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -39,7 +36,18 @@ func Mount(imagePath, mountPoint string) error {
 	if err != nil {
 		return fmt.Errorf("mount failed: %v, %s", err, stderr.String())
 	}
+	return nil
+}
 
+// Unmount unmounts the specified mount point
+func Unmount(mountPoint string) error {
+	cmd := exec.Command("umount", mountPoint)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("umount failed: %v, %s", err, stderr.String())
+	}
 	return nil
 }
 
@@ -59,13 +67,12 @@ func getPartitions(imagePath string) ([]Partition, error) {
 		matches := re.FindStringSubmatch(line)
 		if len(matches) == 5 {
 			start, _ := strconv.ParseInt(matches[1], 10, 64)
-			end, _ := strconv.ParseInt(matches[2], 10, 64)
+			_, _ = strconv.ParseInt(matches[2], 10, 64)
 			sectors, _ := strconv.ParseInt(matches[3], 10, 64)
 			partType := matches[4]
 			partitions = append(partitions, Partition{
 				StartSector: start,
-				EndSector:   end,
-				Size:        sectors * 512, // Размер в байтах
+				Size:        sectors * 512,
 				Type:        partType,
 			})
 		}
