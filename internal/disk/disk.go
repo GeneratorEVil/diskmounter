@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,6 +19,12 @@ type Partition struct {
 
 // Mount mounts the first partition of the image to the specified mount point
 func Mount(imagePath, mountPoint string) error {
+	// Проверяем, является ли файл VDI
+	if isVDI(imagePath) {
+		return mountVDI(imagePath, mountPoint)
+	}
+
+	// Обычная логика для RAW-образов
 	partitions, err := getPartitions(imagePath)
 	if err != nil {
 		return fmt.Errorf("failed to get partitions: %v", err)
@@ -79,4 +86,49 @@ func getPartitions(imagePath string) ([]Partition, error) {
 	}
 
 	return partitions, nil
+}
+
+// isVDI checks if the file is a VDI image based on extension
+func isVDI(imagePath string) bool {
+	return strings.ToLower(filepath.Ext(imagePath)) == ".vdi"
+}
+
+// mountVDI mounts a VDI image using qemu-nbd
+func mountVDI(imagePath, mountPoint string) error {
+	// Загружаем модуль nbd, если не загружен
+	if err := exec.Command("modprobe", "nbd").Run(); err != nil {
+		return fmt.Errorf("failed to load nbd module: %v", err)
+	}
+
+	// Находим свободное nbd-устройство
+	nbdDevice := "/dev/nbd0" // Можно сделать динамический поиск
+	cmd := exec.Command("qemu-nbd", "-c", nbdDevice, imagePath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to connect VDI to %s: %v, %s", nbdDevice, err, stderr.String())
+	}
+
+	// Считываем разделы с nbd-устройства
+	partitions, err := getPartitions(nbdDevice)
+	if err != nil {
+		_ = exec.Command("qemu-nbd", "-d", nbdDevice).Run() // Отключаем в случае ошибки
+		return fmt.Errorf("failed to get partitions from %s: %v", nbdDevice, err)
+	}
+	if len(partitions) == 0 {
+		_ = exec.Command("qemu-nbd", "-d", nbdDevice).Run()
+		return fmt.Errorf("no partitions found in %s", imagePath)
+	}
+
+	// Монтируем первый раздел
+	partitionDevice := nbdDevice + "p1" // Например, /dev/nbd0p1
+	cmd = exec.Command("mount", "-t", "ext4", partitionDevice, mountPoint)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		_ = exec.Command("qemu-nbd", "-d", nbdDevice).Run()
+		return fmt.Errorf("mount failed: %v, %s", err, stderr.String())
+	}
+
+	// Оставляем подключение активным, демонтирование обработает отключение
+	return nil
 }
