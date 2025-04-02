@@ -12,6 +12,7 @@ import (
 // Partition represents a disk partition
 type Partition struct {
 	StartSector int64
+	EndSector   int64
 	Size        int64
 	Type        string
 }
@@ -63,6 +64,7 @@ func getPartitions(imagePath string) ([]Partition, error) {
 			partType := matches[4]
 			partitions = append(partitions, Partition{
 				StartSector: start,
+				EndSector:   end,
 				Size:        sectors * 512, // Размер в байтах
 				Type:        partType,
 			})
